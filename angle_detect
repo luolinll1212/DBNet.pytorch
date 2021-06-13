@@ -1,0 +1,63 @@
+# -*- coding: utf-8 -*-
+import numpy as np
+import cv2
+from apphelper.image import letterbox_image
+import os
+
+
+# tensorflow
+def create_angle_detect_model(AngleModelPb):
+    ##转换为tf模型，以便GPU调用
+    import tensorflow as tf
+    from tensorflow.python.platform import gfile
+    config = tf.ConfigProto(allow_soft_placement=True)
+    sess = tf.Session(config=config)
+    with gfile.FastGFile(AngleModelPb, 'rb') as f:
+        graph_def = tf.GraphDef()
+        graph_def.ParseFromString(f.read())
+        sess.graph.as_default()
+        tf.import_graph_def(graph_def, name='')
+    inputImg = sess.graph.get_tensor_by_name('input_1:0')
+    predictions = sess.graph.get_tensor_by_name('predictions/Softmax:0')
+    keep_prob = tf.placeholder(tf.float32)
+    return sess, inputImg, predictions, keep_prob
+
+
+# 文字方向检测,tensorflow
+def run_angle_detect_image(img, sess, inputImg, predictions, keep_prob, adjust=True):
+    h, w = img.shape[:2]
+    ROTATE = [0, 90, 180, 270]
+    if adjust:
+        thesh = 0.05
+        xmin, ymin, xmax, ymax = int(thesh * w), int(thesh * h), w - int(thesh * w), h - int(thesh * h)
+        img = img[ymin:ymax, xmin:xmax]  ##剪切图片边缘
+    img = cv2.resize(img, (224, 224))
+    img = img[..., ::-1].astype(np.float32)
+
+    img[..., 0] -= 103.939
+    img[..., 1] -= 116.779
+    img[..., 2] -= 123.68
+    img = np.array([img])
+
+    out = sess.run(predictions, feed_dict={inputImg: img,
+                                           keep_prob: 0
+                                           })
+
+    index = np.argmax(out, axis=1)[0]
+    return ROTATE[index]
+
+
+def main():
+    # 创建一个方向检测模型
+    angle_model_pb = "/home/rose/github/chineseocr/checkout/Angle-model.pb"
+    sess, inputImg, predictions, keep_prob = create_angle_detect_model(angle_model_pb)
+
+    # 运行一张图片进行方向检测
+    path = "/home/rose/github/chineseocr/test/img.jpeg"
+    image = cv2.imread(path)
+    result = run_angle_detect_image(image, sess, inputImg, predictions, keep_prob)
+    print(result)
+
+
+if __name__ == '__main__':
+    main()
